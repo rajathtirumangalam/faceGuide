@@ -66,7 +66,7 @@ Website:
 https://rajathtirumangalam.com
 
 LinkedIn:
-https://linkedin.com/in/rajathtirumangalam
+https://linkedin.com/in/rajatht
 
 Books:
 - The Invisible User: What Your Code Assumes [English]
