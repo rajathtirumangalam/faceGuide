@@ -1,16 +1,15 @@
 # FaceGuide
 
-FaceGuide is an accessibility-focused NVDA add-on that helps blind and low vision users independently frame selfies using real-time face positioning, lighting analysis, smile detection, and automatic capture.
+FaceGuide is an accessibility-focused NVDA add-on that helps blind and low vision users independently frame selfies using real-time face positioning, lighting analysis, blur detection, and automatic capture.
 
 ## Features
 
-- Real-time face positioning guidance
-- Clock-direction orientation feedback
+- Real-time face positioning guidance using spoken directions
 - Distance guidance
 - Lighting analysis
 - Blur detection
-- Smile detection
 - Automatic selfie capture
+- Speech and tone-based feedback
 - Hands-free operation
 - Works offline
 
@@ -50,23 +49,27 @@ Captured images are saved only to the local Pictures folder.
 
 ## Known Limitations
 
-- Smile detection accuracy may vary by lighting and webcam quality
+- Lighting analysis accuracy may vary depending on webcam quality
 - Continuous camera processing may increase CPU usage on older systems
 - Multiple faces are not fully supported yet
+- External webcam selection is not currently supported
 
 ## Project Goals
 
 FaceGuide explores how computer vision can improve independent camera use for blind users inside screen reader environments.
 
+## Feedback and Suggestions
+
+Suggestions, bug reports, accessibility feedback, and collaboration ideas are welcome.
+
+Email: admin@rajathtirumangalam.com
+
 ## About the Author
 
 Rajath Tirumangalam is an accessibility professional, author, speaker, and NVDA add-on developer focused on practical digital accessibility and inclusive technology.
 
-Website:
-https://rajathtirumangalam.com
-
-LinkedIn:
-https://linkedin.com/in/rajatht
+Website: https://rajathtirumangalam.com  
+LinkedIn: https://linkedin.com/in/rajatht
 
 Books:
 - The Invisible User: What Your Code Assumes [English]

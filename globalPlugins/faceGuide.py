@@ -1,30 +1,46 @@
-import os
+# globalPlugins/faceGuide.py
+
 import sys
-import threading
+import os
 import time
+import threading
 
-addonPath = os.path.dirname(__file__)
-
-# Load bundled libraries
-sys.path.insert(
-    0,
-    os.path.join(addonPath, "lib")
+sys.path.append(
+    os.path.join(
+        os.path.dirname(__file__),
+        "lib"
+    )
 )
 
 import cv2
-import numpy as np
 
 import globalPluginHandler
 import scriptHandler
 import ui
+import config
+
+from tones import beep
 
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
-    VERSION = "4.0"
-
     def __init__(self):
         super().__init__()
+
+        config.conf.spec["faceGuide"] = {
+
+            "guidanceStyle": "string(default='direction')",
+
+            "feedbackMode": "string(default='speechAndTone')",
+
+            "verbosity": "string(default='normal')",
+
+            "lightingFeedback": "boolean(default=True)",
+
+            "distanceFeedback": "boolean(default=True)"
+        }
+
+        self.settings = config.conf["faceGuide"]
 
         self.running = False
         self.selfieMode = False
@@ -33,14 +49,37 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self.thread = None
 
         self.captureInProgress = False
-        self.lastCaptureTime = 0
 
-        self.smileStartTime = None
+        self.lastSpeech = ""
+
+        self.lastFeedbackTimes = {}
+
+        self.centerStartTime = None
+        self.centerConfirmed = False
+
+    # =====================================================
+    # SAVE SETTINGS
+    # =====================================================
+
+    def saveSettings(self):
+
+        config.conf["faceGuide"] = self.settings
+
+        config.conf.save()
+
+    # =====================================================
+    # TERMINATE
+    # =====================================================
 
     def terminate(self):
 
         self.stopCamera()
+
         super().terminate()
+
+    # =====================================================
+    # START CAMERA
+    # =====================================================
 
     def startCamera(self):
 
@@ -65,13 +104,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             "Face guide started"
         )
 
+    # =====================================================
+    # STOP CAMERA
+    # =====================================================
+
     def stopCamera(self):
 
         self.running = False
 
         self.captureInProgress = False
-
-        self.smileStartTime = None
 
         if self.cap:
 
@@ -82,7 +123,220 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             "Face guide stopped"
         )
 
-    def getClockDirection(
+    # =====================================================
+    # PLAY TONES
+    # =====================================================
+
+    def playTone(
+        self,
+        direction,
+        intensity=1
+    ):
+
+        try:
+
+            if direction == "left":
+
+                beep(
+                    350,
+                    max(40, 220 - intensity * 30)
+                )
+
+            elif direction == "right":
+
+                beep(
+                    850,
+                    max(40, 220 - intensity * 30)
+                )
+
+            elif direction == "up":
+
+                beep(
+                    1200,
+                    100
+                )
+
+            elif direction == "down":
+
+                beep(
+                    250,
+                    120
+                )
+
+            elif direction == "center":
+
+                beep(
+                    1000,
+                    180
+                )
+
+        except:
+            pass
+
+    # =====================================================
+    # FEEDBACK
+    # =====================================================
+
+    def sendFeedback(
+        self,
+        category,
+        value=None,
+        intensity=1
+    ):
+
+        cooldown = 1.2
+
+        currentTime = time.time()
+
+        if category in self.lastFeedbackTimes:
+
+            elapsed = (
+                currentTime
+                - self.lastFeedbackTimes[
+                    category
+                ]
+            )
+
+            if elapsed < cooldown:
+
+                return
+
+        self.lastFeedbackTimes[
+            category
+        ] = currentTime
+
+        spokenText = ""
+
+        if category == "direction":
+
+            style = self.settings[
+                "guidanceStyle"
+            ]
+
+            if style == "direction":
+
+                spokenMap = {
+
+                    "left":
+                    "Move left",
+
+                    "right":
+                    "Move right",
+
+                    "up":
+                    "Move up",
+
+                    "down":
+                    "Move down"
+                }
+
+            else:
+
+                spokenMap = {
+
+                    "left":
+                    "9 o'clock",
+
+                    "right":
+                    "3 o'clock",
+
+                    "up":
+                    "12 o'clock",
+
+                    "down":
+                    "6 o'clock"
+                }
+
+            spokenText = spokenMap.get(
+                value,
+                ""
+            )
+
+        elif category == "centered":
+
+            spokenText = (
+                "Face centered"
+            )
+
+        elif category == "distance":
+
+            spokenText = value
+
+        elif category == "lighting":
+
+            spokenText = value
+
+        elif category == "capture":
+
+            spokenText = value
+
+        elif category == "noface":
+
+            spokenText = (
+                "No face detected"
+            )
+
+        mode = self.settings[
+            "feedbackMode"
+        ]
+
+        if mode == "speech":
+
+            if spokenText:
+
+                ui.message(
+                    spokenText
+                )
+
+        elif mode == "tone":
+
+            if category == "direction":
+
+                self.playTone(
+                    value,
+                    intensity
+                )
+
+            elif category == "centered":
+
+                self.playTone(
+                    "center"
+                )
+
+        elif mode == "speechAndTone":
+
+            if (
+                spokenText
+                and spokenText
+                != self.lastSpeech
+            ):
+
+                ui.message(
+                    spokenText
+                )
+
+                self.lastSpeech = (
+                    spokenText
+                )
+
+            if category == "direction":
+
+                self.playTone(
+                    value,
+                    intensity
+                )
+
+            elif category == "centered":
+
+                self.playTone(
+                    "center"
+                )
+
+    # =====================================================
+    # DIRECTION
+    # =====================================================
+
+    def getDirectionFeedback(
         self,
         faceX,
         faceY,
@@ -90,65 +344,65 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         frameHeight
     ):
 
-        xRatio = faceX / frameWidth
-        yRatio = faceY / frameHeight
+        centerX = frameWidth / 2
+        centerY = frameHeight / 2
 
-        if (
-            0.4 <= xRatio <= 0.6
-            and
-            0.4 <= yRatio <= 0.6
-        ):
+        toleranceX = (
+            frameWidth * 0.10
+        )
 
-            return "Face at center"
+        toleranceY = (
+            frameHeight * 0.10
+        )
 
-        if yRatio < 0.35:
+        horizontal = ""
+        vertical = ""
 
-            if xRatio < 0.4:
+        intensity = 1
 
-                return "Face at 2 o'clock"
+        if faceX < centerX - toleranceX:
 
-            elif xRatio > 0.6:
+            horizontal = "left"
 
-                return "Face at 10 o'clock"
+            distance = abs(
+                faceX - centerX
+            )
 
-            else:
+            intensity = max(
+                1,
+                int(distance / 50)
+            )
 
-                return "Face at 12 o'clock"
+        elif faceX > centerX + toleranceX:
 
-        elif yRatio > 0.65:
+            horizontal = "right"
 
-            if xRatio < 0.4:
+            distance = abs(
+                faceX - centerX
+            )
 
-                return "Face at 4 o'clock"
+            intensity = max(
+                1,
+                int(distance / 50)
+            )
 
-            elif xRatio > 0.6:
+        if faceY < centerY - toleranceY:
 
-                return "Face at 8 o'clock"
+            vertical = "down"
 
-            else:
+        elif faceY > centerY + toleranceY:
 
-                return "Face at 6 o'clock"
+            vertical = "up"
 
-        else:
+        return (
+            horizontal,
+            vertical,
+            intensity
+        )
 
-            if xRatio < 0.4:
-
-                return "Face at 3 o'clock"
-
-            else:
-
-                return "Face at 9 o'clock"
-
-    def countdownSpeech(self):
-
-        ui.message("3")
-        time.sleep(1)
-
-        ui.message("2")
-        time.sleep(1)
-
-        ui.message("1")
-        time.sleep(1)
+    # =====================================================
+    # BLUR
+    # =====================================================
 
     def isBlurry(self, frame):
 
@@ -164,6 +418,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
         return variance < 35
 
+    # =====================================================
+    # LIGHTING
+    # =====================================================
+
     def analyzeLighting(
         self,
         gray,
@@ -173,31 +431,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         h
     ):
 
-        frameBrightness = np.mean(gray)
+        frameBrightness = gray.mean()
 
         faceRegion = gray[
             y:y + h,
             x:x + w
         ]
 
-        faceBrightness = np.mean(faceRegion)
-
-        mask = np.ones(
-            gray.shape,
-            dtype=np.uint8
-        ) * 255
-
-        mask[
-            y:y + h,
-            x:x + w
-        ] = 0
-
-        backgroundPixels = gray[
-            mask == 255
-        ]
-
-        backgroundBrightness = np.mean(
-            backgroundPixels
+        faceBrightness = (
+            faceRegion.mean()
         )
 
         feedback = []
@@ -214,17 +456,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 "Face too bright"
             )
 
-        brightnessDifference = (
-            backgroundBrightness
-            - faceBrightness
-        )
-
-        if brightnessDifference > 40:
-
-            feedback.append(
-                "Bright background behind you"
-            )
-
         if frameBrightness < 40:
 
             feedback.append(
@@ -238,6 +469,25 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             )
 
         return feedback
+
+    # =====================================================
+    # COUNTDOWN
+    # =====================================================
+
+    def countdownSpeech(self):
+
+        ui.message("3")
+        time.sleep(1)
+
+        ui.message("2")
+        time.sleep(1)
+
+        ui.message("1")
+        time.sleep(1)
+
+    # =====================================================
+    # CAPTURE
+    # =====================================================
 
     def captureSelfie(self, frame):
 
@@ -265,7 +515,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
         counter = 1
 
-        while os.path.exists(savePath):
+        while os.path.exists(
+            savePath
+        ):
 
             filename = time.strftime(
                 f"Selfie_%d_%m_%Y_{counter}.jpg"
@@ -283,345 +535,329 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             frame
         )
 
-        ui.message(
+        self.sendFeedback(
+            "capture",
             "Sharp selfie captured"
         )
 
         return True
 
+    # =====================================================
+    # CAMERA LOOP
+    # =====================================================
+
     def cameraLoop(self):
 
-        try:
+        self.cap = cv2.VideoCapture(
+            0
+        )
+
+        if not self.cap.isOpened():
 
             ui.message(
-                "Opening camera"
+                "Unable to access camera"
             )
 
-            self.cap = cv2.VideoCapture(
-                0,
-                cv2.CAP_DSHOW
-            )
+            self.running = False
+            return
 
-            if not self.cap.isOpened():
+        cascadePath = os.path.join(
+            os.path.dirname(__file__),
+            "haarcascade_frontalface_default.xml"
+        )
 
-                ui.message(
-                    "Unable to access camera"
-                )
+        faceCascade = cv2.CascadeClassifier(
+            cascadePath
+        )
 
-                self.running = False
-                return
+        if faceCascade.empty():
 
             ui.message(
-                "Camera connected"
+                "Face cascade failed to load"
             )
-
-            faceCascadePath = os.path.join(
-                addonPath,
-                "haarcascade_frontalface_default.xml"
-            )
-
-            smileCascadePath = os.path.join(
-                addonPath,
-                "haarcascade_smile.xml"
-            )
-
-            faceCascade = cv2.CascadeClassifier(
-                faceCascadePath
-            )
-
-            smileCascade = cv2.CascadeClassifier(
-                smileCascadePath
-            )
-
-            if faceCascade.empty():
-
-                ui.message(
-                    "Face detection file missing"
-                )
-
-                self.running = False
-                return
-
-            if smileCascade.empty():
-
-                ui.message(
-                    "Smile detection file missing"
-                )
-
-                self.running = False
-                return
-
-            lastMessage = ""
-
-            while self.running:
-
-                ret, frame = self.cap.read()
-
-                if not ret:
-
-                    ui.message(
-                        "Camera frame failed"
-                    )
-
-                    break
-
-                gray = cv2.cvtColor(
-                    frame,
-                    cv2.COLOR_BGR2GRAY
-                )
-
-                faces = faceCascade.detectMultiScale(
-                    gray,
-                    scaleFactor=1.1,
-                    minNeighbors=5,
-                    minSize=(60, 60)
-                )
-
-                if len(faces) > 0:
-
-                    x, y, w, h = max(
-                        faces,
-                        key=lambda f: f[2] * f[3]
-                    )
-
-                    faceGray = gray[
-                        y:y+h,
-                        x:x+w
-                    ]
-
-                    smiles = smileCascade.detectMultiScale(
-                        faceGray,
-                        scaleFactor=1.8,
-                        minNeighbors=25,
-                        minSize=(40, 40)
-                    )
-
-                    smileDetected = False
-
-                    for (
-                        sx,
-                        sy,
-                        sw,
-                        sh
-                    ) in smiles:
-
-                        smileRatio = sw / w
-
-                        if smileRatio > 0.35:
-
-                            smileDetected = True
-                            break
-
-                    frameWidth = frame.shape[1]
-                    frameHeight = frame.shape[0]
-
-                    faceCenterX = x + (w // 2)
-                    faceCenterY = y + (h // 2)
-
-                    direction = self.getClockDirection(
-                        faceCenterX,
-                        faceCenterY,
-                        frameWidth,
-                        frameHeight
-                    )
-
-                    faceArea = w * h
-
-                    frameArea = (
-                        frameWidth
-                        * frameHeight
-                    )
-
-                    ratio = (
-                        faceArea
-                        / frameArea
-                    )
-
-                    distanceGood = (
-                        0.08 <= ratio <= 0.30
-                    )
-
-                    lightingFeedback = (
-                        self.analyzeLighting(
-                            gray,
-                            x,
-                            y,
-                            w,
-                            h
-                        )
-                    )
-
-                    parts = []
-
-                    if direction != "Face at center":
-
-                        parts.append(direction)
-
-                    if not distanceGood:
-
-                        if ratio < 0.08:
-
-                            parts.append(
-                                "Move closer"
-                            )
-
-                        else:
-
-                            parts.append(
-                                "Move farther"
-                            )
-
-                    parts.extend(
-                        lightingFeedback
-                    )
-
-                    if not parts:
-
-                        if smileDetected:
-
-                            message = (
-                                "Smile detected"
-                            )
-
-                            if (
-                                self.smileStartTime
-                                is None
-                            ):
-
-                                self.smileStartTime = (
-                                    time.time()
-                                )
-
-                        else:
-
-                            message = (
-                                "Face centered"
-                            )
-
-                            self.smileStartTime = None
-
-                        currentTime = time.time()
-
-                        stableSmile = False
-
-                        if (
-                            self.smileStartTime
-                            is not None
-                        ):
-
-                            if (
-                                currentTime
-                                - self.smileStartTime
-                                >= 2
-                            ):
-
-                                stableSmile = True
-
-                        if (
-                            self.selfieMode
-                            and
-                            stableSmile
-                            and
-                            not self.captureInProgress
-                            and
-                            currentTime
-                            - self.lastCaptureTime
-                            > 5
-                        ):
-
-                            self.captureInProgress = True
-
-                            ui.message(
-                                "Perfect smile detected"
-                            )
-
-                            self.countdownSpeech()
-
-                            ret, freshFrame = (
-                                self.cap.read()
-                            )
-
-                            if ret:
-
-                                success = (
-                                    self.captureSelfie(
-                                        freshFrame
-                                    )
-                                )
-
-                                if success:
-
-                                    self.lastCaptureTime = (
-                                        time.time()
-                                    )
-
-                                    ui.message(
-                                        "Selfie saved"
-                                    )
-
-                            self.captureInProgress = False
-
-                            self.smileStartTime = None
-
-                    else:
-
-                        message = ", ".join(parts)
-
-                        self.smileStartTime = None
-
-                    if message != lastMessage:
-
-                        ui.message(message)
-
-                        lastMessage = message
-
-                else:
-
-                    if (
-                        lastMessage
-                        != "No face detected"
-                    ):
-
-                        ui.message(
-                            "No face detected"
-                        )
-
-                        lastMessage = (
-                            "No face detected"
-                        )
-
-                    self.smileStartTime = None
-
-                time.sleep(0.7)
-
-        except Exception as e:
-
-            ui.message(
-                f"Face guide error {str(e)}"
-            )
-
-        finally:
-
-            if self.cap:
-
-                self.cap.release()
-
-            self.cap = None
 
             self.running = False
 
+            if self.cap:
+                self.cap.release()
+                self.cap = None
+
+            return
+
+        while self.running:
+
+            ret, frame = self.cap.read()
+
+            if not ret:
+
+                ui.message(
+                    "Camera frame failed"
+                )
+
+                break
+
+            gray = cv2.cvtColor(
+                frame,
+                cv2.COLOR_BGR2GRAY
+            )
+
+            faces = (
+                faceCascade.detectMultiScale(
+                    gray,
+                    scaleFactor=1.05,
+                    minNeighbors=4,
+                    minSize=(40, 40)
+                )
+            )
+
+            if len(faces) == 0:
+
+                self.sendFeedback(
+                    "noface"
+                )
+
+                self.centerStartTime = None
+                self.centerConfirmed = False
+
+                time.sleep(0.1)
+
+                continue
+
+            x, y, w, h = max(
+                faces,
+                key=lambda f:
+                f[2] * f[3]
+            )
+
+            frameWidth = (
+                frame.shape[1]
+            )
+
+            frameHeight = (
+                frame.shape[0]
+            )
+
+            faceCenterX = (
+                x + (w // 2)
+            )
+
+            faceCenterY = (
+                y + (h // 2)
+            )
+
+            (
+                horizontal,
+                vertical,
+                intensity
+            ) = (
+                self.getDirectionFeedback(
+                    faceCenterX,
+                    faceCenterY,
+                    frameWidth,
+                    frameHeight
+                )
+            )
+
+            centered = (
+                horizontal == ""
+                and
+                vertical == ""
+            )
+
+            if centered:
+
+                if self.centerStartTime is None:
+
+                    self.centerStartTime = (
+                        time.time()
+                    )
+
+                stableDuration = (
+                    time.time()
+                    - self.centerStartTime
+                )
+
+                if (
+                    stableDuration > 0.7
+                    and not self.centerConfirmed
+                ):
+
+                    self.sendFeedback(
+                        "centered"
+                    )
+
+                    self.centerConfirmed = True
+
+            else:
+
+                self.centerStartTime = None
+                self.centerConfirmed = False
+
+            if not centered:
+
+                if horizontal:
+
+                    self.sendFeedback(
+                        "direction",
+                        horizontal,
+                        intensity
+                    )
+
+                elif vertical:
+
+                    self.sendFeedback(
+                        "direction",
+                        vertical,
+                        intensity
+                    )
+
+            if self.settings[
+                "distanceFeedback"
+            ]:
+
+                faceArea = w * h
+
+                frameArea = (
+                    frameWidth
+                    * frameHeight
+                )
+
+                ratio = (
+                    faceArea
+                    / frameArea
+                )
+
+                distanceGood = (
+                    0.08 <= ratio <= 0.30
+                )
+
+                if (
+                    centered
+                    and not distanceGood
+                ):
+
+                    if ratio < 0.08:
+
+                        self.sendFeedback(
+                            "distance",
+                            "Move closer"
+                        )
+
+                    else:
+
+                        self.sendFeedback(
+                            "distance",
+                            "Move farther"
+                        )
+
+            else:
+
+                distanceGood = True
+
+            lightingGood = True
+
+            if self.settings[
+                "lightingFeedback"
+            ]:
+
+                lightingFeedback = (
+                    self.analyzeLighting(
+                        gray,
+                        x,
+                        y,
+                        w,
+                        h
+                    )
+                )
+
+                if lightingFeedback:
+
+                    lightingGood = False
+
+                if centered:
+
+                    for item in lightingFeedback:
+
+                        self.sendFeedback(
+                            "lighting",
+                            item
+                        )
+
+            ready = (
+                centered
+                and distanceGood
+                and lightingGood
+            )
+
+            if (
+                self.selfieMode
+                and ready
+                and not self.captureInProgress
+            ):
+
+                self.captureInProgress = True
+
+                self.sendFeedback(
+                    "capture",
+                    "Perfect position. Hold still"
+                )
+
+                self.countdownSpeech()
+
+                self.captureSelfie(
+                    frame
+                )
+
+                self.captureInProgress = False
+
+                time.sleep(2)
+
+            time.sleep(0.1)
+
+        if self.cap:
+
+            self.cap.release()
+
+        self.cap = None
+        self.running = False
+
+    # =====================================================
+    # GESTURES
+    # =====================================================
+
     __gestures = {
+
         "kb:NVDA+Shift+G":
             "toggleCamera",
 
         "kb:NVDA+Shift+C":
-            "toggleSelfieMode"
+            "toggleSelfieMode",
+
+        "kb:NVDA+Shift+1":
+            "setDirectionMode",
+
+        "kb:NVDA+Shift+2":
+            "setClockMode",
+
+        "kb:NVDA+Shift+S":
+            "setSpeechMode",
+
+        "kb:NVDA+Shift+T":
+            "setToneMode",
+
+        "kb:NVDA+Shift+B":
+            "setSpeechToneMode"
     }
+
+    # =====================================================
+    # TOGGLE CAMERA
+    # =====================================================
 
     @scriptHandler.script(
         description=
         "Start or stop face guide"
     )
+
     def script_toggleCamera(
         self,
         gesture
@@ -635,10 +871,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
             self.startCamera()
 
+    # =====================================================
+    # SELFIE MODE
+    # =====================================================
+
     @scriptHandler.script(
         description=
-        "Toggle smart selfie mode"
+        "Toggle selfie mode"
     )
+
     def script_toggleSelfieMode(
         self,
         gesture
@@ -651,11 +892,119 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         if self.selfieMode:
 
             ui.message(
-                "Smart selfie mode enabled"
+                "Selfie mode enabled"
             )
 
         else:
 
             ui.message(
-                "Smart selfie mode disabled"
+                "Selfie mode disabled"
             )
+
+    # =====================================================
+    # GUIDANCE STYLE
+    # =====================================================
+
+    @scriptHandler.script(
+        description=
+        "Direction guidance mode"
+    )
+
+    def script_setDirectionMode(
+        self,
+        gesture
+    ):
+
+        self.settings[
+            "guidanceStyle"
+        ] = "direction"
+
+        self.saveSettings()
+
+        ui.message(
+            "Direction guidance mode"
+        )
+
+    @scriptHandler.script(
+        description=
+        "Clock guidance mode"
+    )
+
+    def script_setClockMode(
+        self,
+        gesture
+    ):
+
+        self.settings[
+            "guidanceStyle"
+        ] = "clock"
+
+        self.saveSettings()
+
+        ui.message(
+            "Clock guidance mode"
+        )
+
+    # =====================================================
+    # FEEDBACK MODES
+    # =====================================================
+
+    @scriptHandler.script(
+        description=
+        "Speech feedback mode"
+    )
+
+    def script_setSpeechMode(
+        self,
+        gesture
+    ):
+
+        self.settings[
+            "feedbackMode"
+        ] = "speech"
+
+        self.saveSettings()
+
+        ui.message(
+            "Speech feedback mode"
+        )
+
+    @scriptHandler.script(
+        description=
+        "Tone feedback mode"
+    )
+
+    def script_setToneMode(
+        self,
+        gesture
+    ):
+
+        self.settings[
+            "feedbackMode"
+        ] = "tone"
+
+        self.saveSettings()
+
+        ui.message(
+            "Tone feedback mode"
+        )
+
+    @scriptHandler.script(
+        description=
+        "Speech and tone feedback mode"
+    )
+
+    def script_setSpeechToneMode(
+        self,
+        gesture
+    ):
+
+        self.settings[
+            "feedbackMode"
+        ] = "speechAndTone"
+
+        self.saveSettings()
+
+        ui.message(
+            "Speech and tone feedback mode"
+        )
